@@ -1,9 +1,0 @@
-BOT_TOKEN=6290391317:AAFuMIcLehVI6DHp8hnbli0xroFw1qd6oxw
-
-DB_HOST=localhost
-DB_PASSWORD=QmsTrp873
-DB_NAME=books
-DB_USER=postgres
-DB_PORT=5432
-
-DATABASE_URL=postgresql+asyncpg://postgres:QmsTrp873@localhost/books
