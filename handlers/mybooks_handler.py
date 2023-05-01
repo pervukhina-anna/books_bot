@@ -245,10 +245,15 @@ async def transfer_book(callback: CallbackQuery):
             callback_data=f'status-free_{book_id}',
         )
     )
-
+    url_owner = (f'@{callback.from_user.username}'
+                 if callback.from_user.username is not None
+                 else f'<a href="tg://user?id={callback.from_user.id}">'
+                      f'пользователь</a>'
+           )
     await callback.bot.send_message(
         chat_id=candidate.telegram_id,
-        text=f'Привет!\n{url} хочет передать тебе книгу {book_data_text}.\n\n'
+        text=f'Привет!\n{url_owner} хочет передать тебе книгу '
+             f'{book_data_text}.\n\n'
              f'Пожалуйста, когда получишь её, не забудь сообщить мне об этом!',
         reply_markup=keyboard_for_candidate,
         parse_mode='HTML'
