@@ -1,0 +1,6 @@
+BOT_TOKEN=123456789:abcdefghijklmnopqrstuvwxyz
+DB_USER=user
+DB_PORT=port (example - 5432)
+DB_HOST=localhost
+DB_PASSWORD=password
+DB_NAME=mydatabase
