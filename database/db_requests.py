@@ -161,6 +161,14 @@ async def insert_new_book_instance(user_id, book_data):
                         genre_id=genre_id,
                     )
                 )
+        else:
+            await session.execute(
+                book_genre.insert().values(
+                    book_id=book.id,
+                    genre_id=15,
+                )
+            )
+
         session.add(
             Book(
                 book_id=book.id,
@@ -207,8 +215,6 @@ async def select_users_books(user_id):
                                                       BookData.id,
                                                       DictStatus.id,
                                                       Location.city,
-                                                      # Author.author,
-                                                      # Genre.genre
                                                       ).order_by(DictStatus.id)
                                      )
         return book.fetchall()
@@ -242,8 +248,6 @@ async def select_book(book_id):
                                                       BookData.id,
                                                       DictStatus.id,
                                                       Location.city,
-                                                      # Author.author,
-                                                      # Genre.genre
                                                       ).order_by(DictStatus.id)
                                      )
         return book.fetchone()
@@ -269,6 +273,20 @@ async def update_book(book_id, book_status, candidate_id=None):
                 remain_time=remain_time,
                 candidate_telegram_id=candidate_telegram_id,
                 is_transferred=is_transferred
+            )
+        )
+        await session.commit()
+
+
+async def update_book_canceling_transfer(book_id):
+    async with async_sessionmaker() as session:
+        await session.execute(update(Book).where(
+                Book.id == book_id
+            ).values(
+                status_id=1,
+                remain_time=None,
+                candidate_telegram_id=None,
+                is_transferred=False
             )
         )
         await session.commit()
@@ -313,6 +331,41 @@ async def update_remain_time(book_id):
         await session.commit()
 
 
+async def select_books_by_home_location(user_id):
+    user = await select_user(user_id)
+    location_id = user.location_id
+    async with async_sessionmaker() as session:
+        book = await session.execute(select(
+            Book.id,
+            BookData.id.label('book_id'),
+            BookData.title,
+            array_agg(func.distinct(Author.author)).label('authors'),
+            array_agg(func.distinct(Genre.genre)).label('genres'),
+            DictStatus.status,
+            Location.city,
+            Book.status_id,
+            Book.remain_time,
+            Book.candidate_telegram_id,
+            Book.is_transferred,
+        ).select_from(Book
+                      ).join(BookData
+                      ).outerjoin(DictStatus
+                      ).outerjoin(Location
+                      ).outerjoin(book_author
+                      ).outerjoin(Author
+                      ).outerjoin(book_genre
+                      ).outerjoin(Genre
+                                  ).where(
+            and_(Location.id == location_id, Book.telegram_id != user_id,)
+        ).group_by(Book.id,
+                   BookData.id,
+                   DictStatus.id,
+                   Location.city,
+                   ).order_by(DictStatus.id, BookData.title)
+                                     )
+        return book.fetchall(), location_id
+
+
 async def select_books_by_keyword(user_id, user_input):
     async with async_sessionmaker() as session:
         book = await session.execute(select(
@@ -344,8 +397,6 @@ async def select_books_by_keyword(user_id, user_input):
                                                BookData.id,
                                                DictStatus.id,
                                                Location.city,
-                                               # Author.author,
-                                               # Genre.genre
                                                ).order_by(DictStatus.id,
                                                           Location.city)
                                      )

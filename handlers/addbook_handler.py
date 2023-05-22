@@ -117,7 +117,7 @@ async def get_book(msg: Message, state: FSMContext):
                             if a is not None))
         genre = ', '.join(g for g in set(book.genres) if g is not None)
         button = InlineKeyboardButton(
-            f'"{book.title[:15]}", {author}, {genre}',
+            f'"{book.title}", {author}, {genre}',
             callback_data=f'add-instance_{book.id}',
         )
         keyboard.add(button)
@@ -222,6 +222,8 @@ async def save_new_book(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     await insert_new_book_instance(callback.from_user.id, data)
     title, author, genre = await get_book_data(data)
+    # if not genre:
+    #     genre = 'Другое'
 
     await callback.message.answer(
         f'Отлично!\n'
@@ -260,7 +262,11 @@ async def save_new_book(callback: CallbackQuery, state: FSMContext):
 
 def register_addbook(dispatcher: Dispatcher):
     FSMAddBook.commands.update({'/addbook': cmd_addbook})
-    dispatcher.register_message_handler(cmd_addbook, commands='addbook')
+    dispatcher.register_message_handler(
+        cmd_addbook,
+        commands='addbook',
+        state='*'
+    )
     # dp.register_message_handler(
     #     cmd_addbook, Text(equals='Добавить книгу', ignore_case=True)
     # )

@@ -18,7 +18,7 @@ from database.db_requests import (
     select_book,
     select_books_by_keyword,
     select_user,
-    update_book,
+    update_book, select_books_by_home_location,
 )
 from handlers.lexicon import declensions
 
@@ -56,9 +56,13 @@ async def cmd_findbook(msg: Message, state: FSMContext):
 
 async def search_by_keyword(callback: CallbackQuery):
     await callback.message.delete()
-    await callback.message.answer('Для поиска по ключевым словам введи '
-                                  'название книги, её автора или жанр!')
-    await FSMFindBook.by_keyword.set()
+    if callback.data == 'search-keyword':
+        await FSMFindBook.by_keyword.set()
+        return await callback.message.answer(
+            'Для поиска по ключевым словам введи название '
+            'книги, её автора или жанр!'
+        )
+    return await FSMFindBook.by_location.set()
 
 
 async def result_by_keyword(msg: Message | CallbackQuery, state: FSMContext):
@@ -85,7 +89,7 @@ async def result_by_keyword(msg: Message | CallbackQuery, state: FSMContext):
                 callback_data=f'search_{book.id}'
             )
         )
-    text = 'Вот что могу предложить из книг в твоём городе:'
+    text = 'Вот что могу предложить из книг для обмена:'
     await FSMFindBook.by_keyword_detail.set()
     return (await msg.answer(text, reply_markup=keyboard)
             if isinstance(msg, Message)
@@ -204,11 +208,24 @@ async def want_take(callback: CallbackQuery, state: FSMContext):
         reply_markup=keyboard,
         parse_mode='HTML'
     )
+    await state.finish()
 
 
 async def change_status_booked(callback: CallbackQuery):
     callback_data = callback.data.split('_')
     book_id = int(callback_data[1])
+    book = await select_book(book_id)
+    title, author, genre = await get_book_data(book)
+
+    if book.status == 'Забронирована':
+        await callback.message.answer(
+            f'Книга: "{title}"\n'
+            f'{declensions[0][len(author) > 1]}: {author}\n'
+            f'{declensions[1][len(genre) > 1]}: {genre}\n'
+            f'забронирована за другим пользователем. '
+        )
+        return
+
     user_id = int(callback_data[2])
     user = await select_user(user_id)
     url = (
@@ -217,8 +234,18 @@ async def change_status_booked(callback: CallbackQuery):
     )
 
     await update_book(book_id, 2, user_id)
-    book = await select_book(book_id)
-    title, author, genre = await get_book_data(book)
+    # book = await select_book(book_id)
+    # title, author, genre = await get_book_data(book)
+
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton(
+            'Отменить бронь', callback_data=f'status-free_{book_id}_1'
+        ),
+        InlineKeyboardButton(
+            'Передать книгу', callback_data=f'transfer-book_{book_id}'
+        ),
+    )
 
     await callback.message.delete()
     await callback.message.answer(
@@ -226,10 +253,10 @@ async def change_status_booked(callback: CallbackQuery):
         f'Книга: {title}\n'
         f'{declensions[0][len(author) > 1]}: {author}\n'
         f'{declensions[1][len(genre) > 1]}: {genre}\n'
-        f'изменен на: "{book.status}".\n\n'
+        f'изменён на: "Забронирована".\n\n'
         f'Не забудь связаться с {url} и договориться о передаче книги!',
-        parse_mode='HTML'
-        # reply_markup=keyboard,
+        parse_mode='HTML',
+        reply_markup=keyboard,
     )
 
 
@@ -239,95 +266,64 @@ async def return_keyword_results(callback: CallbackQuery, state: FSMContext):
     await result_by_keyword(callback, state)
 
 
-# async def search_by_home_location(callback: CallbackQuery, state: FSMContext):
-#     await callback.message.delete()
-#     async with async_sessionmaker() as session:
-#         user = await session.get(User, callback.from_user.id)
-#         location = user.location_id
-#         books = await session.execute(select(
-#             Book.id,
-#             Book.location_id,
-#             BookData.id,
-#             BookData.title,
-#             array_agg(Author.author).label('authors'),
-#             array_agg(Genre.genre).label('genres'),
-#             DictStatus.status,
-#             Location.city
-#         ).select_from(
-#             join(BookData, book_author
-#                  ).join(Author
-#                         ).join(book_genre
-#                                ).join(Genre
-#                                       ).join(Book
-#                                              ).join(DictStatus
-#                                                     ).join(Location)
-#         ).where(and_(
-#             Book.location_id == location,
-#             Book.telegram_id != callback.from_user.id
-#         )).group_by(
-#             BookData.title,
-#             BookData.id,
-#             DictStatus.id,
-#             Book.id,
-#             Location.city
-#         ).order_by(DictStatus.id
-#                    )
-#                                       )
-#         # books = await session.execute(
-#         #     select(Book.book_id, Book.status_id, DictStatus.status
-#         #            ).select_from(
-#         #         join(DictStatus, Book)
-#         #     ).filter(
-#         #         and_(
-#         #             Book.location_id == location,
-#         #             Book.telegram_id != callback.message.from_user.id
-#         #         )).order_by(Book.status_id))
-#         books = books.fetchall()
-#         if len(books) == 0:
-#             await callback.message.answer(
-#                 'К сожалению, в твоем городе ничего не найдено.\n'
-#                 'Хочешь поискать в других городах?'
-#             )
-#             return
-#
-#         books_ff = [book[0] for book in books]
-#         s = {}
-#         s = s.fromkeys(books_ff, [])
-#         keyboard = InlineKeyboardMarkup()
-#         query_f = await session.execute(
-#             select(BookData.id, BookData.title, Author.author
-#                    ).select_from(
-#                 join(BookData, book_author).join(Author)
-#             ).filter(BookData.id.in_(books_ff)))
-#         result_f = query_f.fetchall()
-#
-#         for row in result_f:
-#             book_id, title, author = row
-#             if title in s[book_id]:
-#                 s[book_id].append(author)
-#                 continue
-#             s[book_id] = [title, author]
-#         i = 0
-#         for k, v in s.items():
-#             title, *authors = v
-#             status = books_f[i][2]
-#             keyboard.add(
-#                 InlineKeyboardButton(
-#                     f'"{title}", {", ".join(authors)}, {status}',
-#                     callback_data=f'search_{k}'
-#                 )
-#             )
-#             i += 1
-#
-#         await callback.message.answer(
-#             f'Вот книжки:',
-#             reply_markup=keyboard
-#         )
-#         await FSMFindBook.by_keyword_detail.set()
-#
-#
-# async def search_by_location(callback_query: CallbackQuery):
-#     ...
+async def search_by_home_location(callback: CallbackQuery, state: FSMContext):
+    await FSMFindBook.by_location.set()
+    books, location_id = await select_books_by_home_location(
+        callback.from_user.id
+    )
+
+    if len(books) == 0:
+        await callback.message.delete()
+        await callback.message.answer(
+            'К сожалению, в твоем городе ничего не найдено.\n'
+            'Хочешь поискать в других городах?'  # TODO доработать поиск как по ключевым словам но по городам?
+            )
+        return
+
+    keyboard = InlineKeyboardMarkup()
+    for book in books:
+        title, author, genre = await get_book_data(book)
+        keyboard.add(
+            InlineKeyboardButton(
+                f'"{title}", {author}, {book.status}',
+                callback_data=f'detail_{book.id}'
+            )
+        )
+    text = 'Вот что могу предложить из книг в твоём городе:'
+    await callback.message.delete()
+    await callback.message.answer(text, reply_markup=keyboard)
+    async with state.proxy() as data:
+        data['by_location'] = location_id
+
+
+async def detail_by_location(callback: CallbackQuery, state: FSMContext):
+    book_id = int(callback.data.split('_')[1])
+    data = await state.get_data()
+    by_location = data.get('by_location')
+    book = await select_book(book_id)
+    title, author, genre = await get_book_data(book)
+    location_keyboard = InlineKeyboardMarkup()
+    location_keyboard.add(
+        InlineKeyboardButton(
+            'Хочу взять', callback_data=f'want_{book.id}'
+        ),
+        InlineKeyboardButton(
+            'Вернуться к списку книг', callback_data=f'searchloc_{by_location}'
+        )
+    )
+    await callback.message.delete()
+    await callback.message.answer(
+        f'Книга: {title}\n'
+        f'{declensions[0][len(author) > 1]}: {author}\n'
+        f'{declensions[1][len(genre) > 1]}: {genre}\n'
+        f'Статус: {book.status}\n'
+        f'Город: {book.city}',
+        reply_markup=location_keyboard,
+    )
+
+
+async def return_location_result(callback: CallbackQuery, state: FSMContext):
+    await search_by_home_location(callback, state)
 
 
 def register_findbook(dispatcher: Dispatcher):
@@ -345,11 +341,16 @@ def register_findbook(dispatcher: Dispatcher):
         lambda callback: callback.data == 'search-keyword',
         Text(equals='search-keyword')
     )
-    # dispatcher.register_callback_query_handler(
-    #     search_by_home_location,
-    #     lambda callback: callback.data == 'search-location',
-    #     Text(equals='search-location')
-    # )
+    dispatcher.register_callback_query_handler(
+        search_by_home_location,
+        lambda callback: callback.data == 'search-location',
+        Text(equals='search-location')
+    )
+    dispatcher.register_callback_query_handler(
+        return_location_result,
+        Text(startswith='searchloc_'),
+        state=FSMFindBook.by_location
+    )
     dispatcher.register_message_handler(
         result_by_keyword,
         state=FSMFindBook.by_keyword,
@@ -358,6 +359,11 @@ def register_findbook(dispatcher: Dispatcher):
         detail_by_keyword,
         Text(startswith='search_'),
         state=FSMFindBook.by_keyword_detail
+    )
+    dispatcher.register_callback_query_handler(
+        detail_by_location,
+        Text(startswith='detail_'),
+        state=FSMFindBook.by_location
     )
 
     dispatcher.register_callback_query_handler(

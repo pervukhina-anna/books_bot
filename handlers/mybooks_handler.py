@@ -24,7 +24,7 @@ from database.db_requests import (
     update_book,
     update_book_transfer,
     update_book_transfer_by_candidate,
-    update_remain_time,
+    update_remain_time, update_book_canceling_transfer,
 )
 from database.models import Book, BookData
 from handlers.lexicon import declensions
@@ -172,30 +172,58 @@ async def change_status(callback: CallbackQuery):
     book = await select_book(book_id)
     title, author, genre = await get_book_data(book)
     candidate_id = book.candidate_telegram_id
-    await update_book(book_id, book_status)
+    await update_book_canceling_transfer(book_id)
+    # await update_book(book_id, book_status)
 
     book_data_text = f'"{title}", {author}'
-    owner_url = (
-        f'@{callback.from_user.username}'
-        if callback.from_user.username is not None
-        else f'<a href="tg://user?id={callback.from_user.id}">'
-             f'Владелец книги</a>'
-    )
-
+    initiator = callback.from_user.id
+    owner = book.telegram_id
+    if initiator == candidate_id:
+        user_url = (
+            f'@{callback.from_user.username}'
+            if callback.from_user.username is not None
+            else f'<a href="tg://user?id={callback.from_user.id}">'
+                 f'Пользователь</a>'
+        )
+    else:
+        user_url = (
+            f'@{callback.from_user.username}'
+            if callback.from_user.username is not None
+            else f'<a href="tg://user?id={callback.from_user.id}">'
+                 f'Владелец книги</a>'
+        )
     await callback.bot.send_message(
-        chat_id=candidate_id,
-        text=f'{owner_url} отменил передачу книги {book_data_text}.',
+        chat_id=candidate_id if initiator == owner else owner,
+        text=f'{user_url} отменил передачу книги {book_data_text}.',
         parse_mode='HTML'
     )
 
+
+    # owner_url = (
+    #     f'@{callback.from_user.username}'
+    #     if callback.from_user.username is not None
+    #     else f'<a href="tg://user?id={callback.from_user.id}">'
+    #          f'Владелец книги</a>'
+    # )
+
+    # await callback.bot.send_message(
+    #     chat_id=candidate_id,
+    #     text=f'{owner_url} отменил передачу книги {book_data_text}.',
+    #     parse_mode='HTML'
+    # )
+
     await callback.message.delete()
     text = (f'Статус книги {book_data_text} изменён на: "Свободна".'
-            if book_status == 1
+            if any([book_status == 1, book_status == 2])
             else (f'Статус книги {book_data_text} изменён на: "Читается".\n'
                   f'На чтение книги отводится до 90 дней, но в случае '
                   f'необходимости ты сможешь продлить чтение.')
             )
-    await callback.message.answer(text)
+    # await callback.message.answer(text)
+    await (
+        callback.message.answer(text) if initiator == owner
+        else callback.bot.send_message(chat_id=owner, text=text)
+    )
 
 
 async def increase_reading_time(callback: CallbackQuery):
@@ -220,6 +248,11 @@ async def transfer_book(callback: CallbackQuery):
     book = await select_book(book_id)
     await update_book_transfer(book_id)
     candidate = await select_user(book.candidate_telegram_id)
+    if not candidate:
+        await callback.message.delete()
+        await callback.message.answer(
+            f'Невозможно передать книгу.\n'
+        )
     url = (f'@{candidate.username}' if candidate.username is not None
            else f'<a href="tg://user?id={candidate.telegram_id}">'
                 f'пользователь</a>'
@@ -242,7 +275,7 @@ async def transfer_book(callback: CallbackQuery):
         ),
         InlineKeyboardButton(
             'Отменить передачу книги',
-            callback_data=f'status-free_{book_id}',
+            callback_data=f'status-free_{book_id}_{book.status_id}',
         )
     )
     url_owner = (f'@{callback.from_user.username}'
